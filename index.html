@@ -12,35 +12,49 @@ body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospac
   position: fixed; inset: 0; z-index: 100; background: #0a0a0a;
   display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer;
 }
-#startScreen h1 { font-size: 3rem; color: #d4a840; margin-bottom: 1rem; }
+#startScreen h1 { font-size: 3rem; color: #00e5ff; margin-bottom: 1rem; letter-spacing: 0.2em; }
 #startScreen p { font-size: 1.2rem; color: #888; }
 
 #ui {
   height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 12px;
   background: #111; border-bottom: 1px solid #333; font-size: 12px; flex-shrink: 0;
+  position: relative; z-index: 10;
 }
 #ui label { color: #999; }
-#ui input[type="range"] { width: 70px; accent-color: #d4a840; vertical-align: middle; }
+#ui input[type="range"] { width: 70px; accent-color: #00e5ff; vertical-align: middle; }
 #ui button, #ui select {
-  background: #222; color: #d4a840; border: 1px solid #444; padding: 3px 10px;
+  background: #222; color: #00e5ff; border: 1px solid #444; padding: 3px 10px;
   font-family: inherit; font-size: 12px; cursor: pointer; border-radius: 3px;
 }
 #ui button:hover, #ui select:hover { background: #333; }
-#ui button.active { background: #d4a840; color: #0a0a0a; }
+#ui button.active { background: #00e5ff; color: #0a0a0a; }
 #ui .sep { width: 1px; height: 24px; background: #333; }
 
-#main { display: flex; height: calc(100vh - 44px); }
-#monitor { width: 35%; position: relative; background: #080808; overflow: hidden; }
-#visual { width: 65%; position: relative; background: #0a0a0a; }
-
-#monitorCanvas, #video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
-#video { opacity: 0.5; }
-#monitorCanvas { z-index: 1; }
-#status {
-  position: absolute; bottom: 8px; left: 8px; z-index: 2;
-  font-size: 11px; color: #888; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 3px;
-}
+#main { position: relative; height: calc(100vh - 44px); }
 #visualCanvas { width: 100%; height: 100%; display: block; }
+
+/* Camera preview — small bottom-left overlay */
+#camPreview {
+  position: absolute; bottom: 12px; left: 12px; z-index: 5;
+  width: 160px; height: 90px; border: 1px solid #333; border-radius: 4px; overflow: hidden;
+  background: #000;
+}
+#camPreview video { width: 100%; height: 100%; object-fit: cover; opacity: 0.7; }
+
+/* Dashboard — right side overlay */
+#dashboard {
+  position: absolute; top: 12px; right: 12px; z-index: 5;
+  background: rgba(0,0,0,0.7); border: 1px solid #333; border-radius: 6px;
+  padding: 12px 16px; font-size: 12px; min-width: 160px;
+}
+#dashboard .row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+#dashboard .row:last-child { margin-bottom: 0; }
+#dashboard .label { color: #888; min-width: 55px; }
+#dashboard .value { color: #00e5ff; font-weight: bold; }
+#dashboard .dot { width: 8px; height: 8px; border-radius: 50%; background: #555; flex-shrink: 0; }
+#dashboard .dot.active { background: #0f0; }
+.velBar { width: 60px; height: 8px; background: #222; border-radius: 4px; overflow: hidden; }
+.velBar .fill { height: 100%; background: #00e5ff; transition: width 50ms; }
 </style>
 </head>
 <body>
@@ -55,11 +69,12 @@ body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospac
   <div class="sep"></div>
   <button id="modeBtn">Hands</button>
   <div class="sep"></div>
-  <button id="echoBtn">Echo OFF</button>
+  <button id="echoBtn" class="active">Echo ON</button>
   <div class="sep"></div>
-  <label>PoseT <input type="range" id="threshSlider" min="1" max="20" value="5"></label>
+  <label>Retrig <input type="range" id="retrigSlider" min="10" max="300" value="50"></label>
+  <span id="retrigVal" style="color:#888;font-size:11px;">50ms</span>
   <div class="sep"></div>
-  <button id="visualBtn">Flashes</button>
+  <button id="visualBtn">Plexus</button>
   <div class="sep"></div>
   <label>Persons <select id="personsSel">
     <option value="1">1</option>
@@ -69,13 +84,29 @@ body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospac
 </div>
 
 <div id="main" style="display:none;">
-  <div id="monitor">
+  <canvas id="visualCanvas"></canvas>
+  <div id="camPreview">
     <video id="video" autoplay playsinline muted></video>
-    <canvas id="monitorCanvas"></canvas>
-    <div id="status">Starting...</div>
   </div>
-  <div id="visual">
-    <canvas id="visualCanvas"></canvas>
+  <div id="dashboard">
+    <div class="row">
+      <div class="dot" id="trackDot"></div>
+      <span class="label">Tracking</span>
+      <span class="value" id="dashHands">-</span>
+    </div>
+    <div class="row">
+      <span class="label">Velocity</span>
+      <div class="velBar"><div class="fill" id="velFill" style="width:0%"></div></div>
+      <span class="value" id="dashVel">0%</span>
+    </div>
+    <div class="row">
+      <span class="label">Spread</span>
+      <span class="value" id="dashSpread">-</span>
+    </div>
+    <div class="row">
+      <span class="label">Gesture</span>
+      <span class="value" id="dashGesture">-</span>
+    </div>
   </div>
 </div>
 
@@ -87,35 +118,38 @@ const startScreen = document.getElementById('startScreen');
 const ui = document.getElementById('ui');
 const mainDiv = document.getElementById('main');
 const video = document.getElementById('video');
-const monCanvas = document.getElementById('monitorCanvas');
-const monCtx = monCanvas.getContext('2d');
 const visCanvas = document.getElementById('visualCanvas');
 const visCtx = visCanvas.getContext('2d');
-const statusEl = document.getElementById('status');
 
 const volSlider = document.getElementById('volSlider');
 const modeBtn = document.getElementById('modeBtn');
 const echoBtn = document.getElementById('echoBtn');
-const threshSlider = document.getElementById('threshSlider');
+const retrigSlider = document.getElementById('retrigSlider');
+const retrigVal = document.getElementById('retrigVal');
 const visualBtn = document.getElementById('visualBtn');
 const personsSel = document.getElementById('personsSel');
 
+// Dashboard
+const trackDot = document.getElementById('trackDot');
+const dashHands = document.getElementById('dashHands');
+const dashVel = document.getElementById('dashVel');
+const velFill = document.getElementById('velFill');
+const dashSpread = document.getElementById('dashSpread');
+const dashGesture = document.getElementById('dashGesture');
+
 // ── State ──
-let mode = 'hands'; // 'hands' | 'body'
-let echoOn = false;
-let visualMode = 'flashes'; // 'flashes' | 'waveform'
-let threshold = 0.05;
+let mode = 'hands';
+let echoOn = true;
+let visualMode = 'plexus';
 let volScale = 0.8;
 let numPersons = 1;
-let poseVel = 0;
+let retriggerMs = 50;
 let lastTriggerTime = 0;
 let prevLandmarks = null;
 let handLandmarker = null;
 let poseLandmarker = null;
 let running = false;
-
-// Flash particles
-const flashes = [];
+let lastDetectTimestamp = 0;
 
 // BroadcastChannel
 const bc = new BroadcastChannel('plexus-drum');
@@ -125,6 +159,7 @@ let audioCtx = null;
 let dryGain = null;
 let echoDelay = null;
 let echoFeedback = null;
+let echoFilter = null;
 let echoWet = null;
 let analyser = null;
 
@@ -134,16 +169,20 @@ function initAudio() {
   dryGain.gain.value = 1;
   dryGain.connect(audioCtx.destination);
 
-  // Echo chain
+  // Echo chain: dry -> delay -> feedback loop (with lowpass) -> wet -> destination
   echoDelay = audioCtx.createDelay(1);
-  echoDelay.delayTime.value = 0.12;
+  echoDelay.delayTime.value = 0.18; // 180ms
   echoFeedback = audioCtx.createGain();
   echoFeedback.gain.value = 0.35;
+  echoFilter = audioCtx.createBiquadFilter();
+  echoFilter.type = 'lowpass';
+  echoFilter.frequency.value = 3000;
   echoWet = audioCtx.createGain();
-  echoWet.gain.value = 0;
+  echoWet.gain.value = 0.3; // Echo ON by default
 
   dryGain.connect(echoDelay);
-  echoDelay.connect(echoFeedback);
+  echoDelay.connect(echoFilter);
+  echoFilter.connect(echoFeedback);
   echoFeedback.connect(echoDelay);
   echoDelay.connect(echoWet);
   echoWet.connect(audioCtx.destination);
@@ -153,7 +192,7 @@ function initAudio() {
   dryGain.connect(analyser);
 }
 
-function plxKick(v) {
+function playKick(v) {
   const t = audioCtx.currentTime;
   const osc = audioCtx.createOscillator();
   const g = audioCtx.createGain();
@@ -168,9 +207,8 @@ function plxKick(v) {
   osc.stop(t + 0.2);
 }
 
-function plxSnare(v) {
+function playSnare(v) {
   const t = audioCtx.currentTime;
-  // Noise
   const bufLen = audioCtx.sampleRate * 0.1;
   const buf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
   const data = buf.getChannelData(0);
@@ -202,7 +240,7 @@ function plxSnare(v) {
   osc.stop(t + 0.08);
 }
 
-function plxHiHat(v) {
+function playHiHat(v) {
   const t = audioCtx.currentTime;
   const bufLen = audioCtx.sampleRate * 0.04;
   const buf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
@@ -228,7 +266,6 @@ modeBtn.addEventListener('click', () => {
   mode = mode === 'hands' ? 'body' : 'hands';
   modeBtn.textContent = mode === 'hands' ? 'Hands' : 'Body';
   prevLandmarks = null;
-  poseVel = 0;
 });
 
 echoBtn.addEventListener('click', () => {
@@ -239,11 +276,14 @@ echoBtn.addEventListener('click', () => {
 });
 
 visualBtn.addEventListener('click', () => {
-  visualMode = visualMode === 'flashes' ? 'waveform' : 'flashes';
-  visualBtn.textContent = visualMode === 'flashes' ? 'Flashes' : 'Waveform';
+  visualMode = visualMode === 'plexus' ? 'waveform' : 'plexus';
+  visualBtn.textContent = visualMode === 'plexus' ? 'Plexus' : 'Waveform';
 });
 
-threshSlider.addEventListener('input', () => { threshold = threshSlider.value / 100; });
+retrigSlider.addEventListener('input', () => {
+  retriggerMs = parseInt(retrigSlider.value);
+  retrigVal.textContent = retriggerMs + 'ms';
+});
 volSlider.addEventListener('input', () => { volScale = volSlider.value / 100; });
 personsSel.addEventListener('change', async () => {
   numPersons = parseInt(personsSel.value);
@@ -276,14 +316,8 @@ async function initMediaPipe() {
 }
 
 async function rebuildLandmarkers() {
-  if (handLandmarker) {
-    handLandmarker.close();
-    handLandmarker = null;
-  }
-  if (poseLandmarker) {
-    poseLandmarker.close();
-    poseLandmarker = null;
-  }
+  if (handLandmarker) { handLandmarker.close(); handLandmarker = null; }
+  if (poseLandmarker) { poseLandmarker.close(); poseLandmarker = null; }
   const vision = await FilesetResolver.forVisionTasks(
     'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
   );
@@ -314,58 +348,98 @@ async function initCamera() {
   await new Promise(r => { video.onloadeddata = r; });
 }
 
-// ── Pose joint indices: shoulders, elbows, wrists, hips, knees, ankles ──
-const POSE_JOINTS = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+// ── Pose joint indices ──
+const POSE_JOINTS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
 
-// ── Main Loop ──
-function extractPoints(results) {
-  const points = [];
-  if (mode === 'hands' && results.handLandmarks) {
-    for (const hand of results.handLandmarks) {
-      for (const lm of hand) {
-        points.push({ x: lm.x, y: lm.y, z: lm.z || 0 });
-      }
-    }
-  } else if (mode === 'body' && results.poseLandmarks) {
-    for (const pose of results.poseLandmarks) {
-      for (const idx of POSE_JOINTS) {
-        if (pose[idx]) {
-          points.push({ x: pose[idx].x, y: pose[idx].y, z: pose[idx].z || 0 });
-        }
-      }
+// ── Finger tip indices for spread calculation ──
+const FINGER_TIPS = [4, 8, 12, 16, 20];
+
+// ── Compute finger spread (average pairwise distance between fingertips) ──
+function computeSpread(handLandmarks) {
+  // Use the first hand that has landmarks
+  if (!handLandmarks || handLandmarks.length === 0) return 0;
+  const hand = handLandmarks[0];
+  let totalDist = 0;
+  let pairs = 0;
+  for (let i = 0; i < FINGER_TIPS.length; i++) {
+    for (let j = i + 1; j < FINGER_TIPS.length; j++) {
+      const a = hand[FINGER_TIPS[i]];
+      const b = hand[FINGER_TIPS[j]];
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      totalDist += Math.sqrt(dx * dx + dy * dy);
+      pairs++;
     }
   }
-  return points;
+  return totalDist / pairs; // 10 pairs
 }
 
-function computeMaxVelocity(currentPoints) {
-  if (!prevLandmarks || prevLandmarks.length !== currentPoints.length) {
-    prevLandmarks = currentPoints;
+// ── Compute average velocity of all landmarks ──
+function computeAvgVelocity(currentPoints) {
+  if (!prevLandmarks || prevLandmarks.length !== currentPoints.length || currentPoints.length === 0) {
+    prevLandmarks = currentPoints.map(p => ({x: p.x, y: p.y}));
     return 0;
   }
-  let maxV = 0;
-  let maxIdx = 0;
+  let totalV = 0;
   for (let i = 0; i < currentPoints.length; i++) {
     const dx = currentPoints[i].x - prevLandmarks[i].x;
     const dy = currentPoints[i].y - prevLandmarks[i].y;
-    const dz = currentPoints[i].z - prevLandmarks[i].z;
-    const v = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (v > maxV) { maxV = v; maxIdx = i; }
+    totalV += Math.sqrt(dx * dx + dy * dy);
   }
-  prevLandmarks = currentPoints;
-  return maxV;
+  prevLandmarks = currentPoints.map(p => ({x: p.x, y: p.y}));
+  return totalV / currentPoints.length;
 }
 
+// ── Plexus drawing ──
+function drawPlexus(ctx, points, w, h, confidence) {
+  const maxDist = 400;
+  // Lines between all pairs
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const dx = points[i].px - points[j].px;
+      const dy = points[i].py - points[j].py;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < maxDist) {
+        const opacity = (1 - dist / maxDist) * 0.5 * confidence;
+        ctx.beginPath();
+        ctx.moveTo(points[i].px, points[i].py);
+        ctx.lineTo(points[j].px, points[j].py);
+        ctx.strokeStyle = 'rgba(0, 229, 255, ' + opacity + ')';
+        ctx.lineWidth = opacity > 0.25 ? 1.5 : 0.8;
+        ctx.stroke();
+      }
+    }
+  }
+  // Nodes
+  for (const p of points) {
+    // Glow halo
+    ctx.beginPath();
+    ctx.arc(p.px, p.py, 7, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 229, 255, ' + (0.12 * confidence) + ')';
+    ctx.fill();
+    // Node
+    ctx.beginPath();
+    ctx.arc(p.px, p.py, 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 229, 255, ' + confidence + ')';
+    ctx.fill();
+  }
+}
+
+// ── Main Loop ──
 let lastFrameTime = 0;
 
 function loop(timestamp) {
   if (!running) return;
   requestAnimationFrame(loop);
 
-  if (timestamp - lastFrameTime < 16) return; // ~60fps cap
+  if (timestamp - lastFrameTime < 16) return;
   lastFrameTime = timestamp;
 
+  // Strictly increasing timestamps for detectForVideo
   const ts = performance.now();
+  if (ts <= lastDetectTimestamp) return;
+  lastDetectTimestamp = ts;
+
   let handResults = null;
   let poseResults = null;
 
@@ -375,163 +449,143 @@ function loop(timestamp) {
     poseResults = poseLandmarker.detectForVideo(video, ts);
   }
 
-  const results = {
-    handLandmarks: handResults ? handResults.landmarks : [],
-    poseLandmarks: poseResults ? poseResults.landmarks : []
-  };
+  const handLandmarks = handResults ? handResults.landmarks : [];
+  const poseLandmarks = poseResults ? poseResults.landmarks : [];
 
-  // Broadcast
-  bc.postMessage({ mode, handLandmarks: results.handLandmarks, poseLandmarks: results.poseLandmarks });
+  // Broadcast landmarks for mirror
+  bc.postMessage({
+    mode,
+    handLandmarks: handLandmarks.map(h => h.map(l => ({x: l.x, y: l.y, z: l.z || 0}))),
+    poseLandmarks: poseLandmarks.map(p => p.map(l => ({x: l.x, y: l.y, z: l.z || 0})))
+  });
 
-  const points = extractPoints(results);
-  const rawVel = computeMaxVelocity(points);
-
-  // Smooth
-  poseVel = poseVel * 0.7 + rawVel * 0.3;
-
-  // Trigger
-  const now = performance.now();
-  let triggered = false;
-  let speedNorm = 0;
-
-  if (poseVel >= threshold) {
-    speedNorm = Math.min((poseVel - threshold) / (0.3 - threshold), 1);
-    if (speedNorm < 0) speedNorm = 0;
-    const retriggerTime = 150 - (150 - 15) * speedNorm;
-
-    if (now - lastTriggerTime >= retriggerTime) {
-      lastTriggerTime = now;
-      triggered = true;
-      const vol = Math.min(speedNorm * 1.2, 1) * volScale;
-
-      plxKick(vol * 0.6);
-      plxSnare(vol);
-      if (poseVel > 0.03) plxHiHat(vol * 0.7);
-
-      // Add flashes at triggering points
-      if (points.length > 0) {
-        // Find the top velocity points for flash positions
-        const flashCount = Math.min(points.length, 5);
-        for (let i = 0; i < flashCount; i++) {
-          const idx = Math.floor(Math.random() * points.length);
-          flashes.push({
-            x: points[idx].x,
-            y: points[idx].y,
-            r: 4 + speedNorm * 20,
-            alpha: 1,
-            birth: now
-          });
-        }
-      }
-    }
-  }
-
-  // ── Draw Monitor ──
-  monCanvas.width = monCanvas.clientWidth;
-  monCanvas.height = monCanvas.clientHeight;
-  monCtx.clearRect(0, 0, monCanvas.width, monCanvas.height);
-
-  const scaleX = monCanvas.width;
-  const scaleY = monCanvas.height;
-
-  // Draw hand landmarks (gold dots)
-  if (results.handLandmarks) {
-    for (const hand of results.handLandmarks) {
-      monCtx.fillStyle = '#d4a840';
-      for (const lm of hand) {
-        monCtx.beginPath();
-        monCtx.arc(lm.x * scaleX, lm.y * scaleY, 3, 0, Math.PI * 2);
-        monCtx.fill();
-      }
-      // Connect fingers
-      const connections = [
-        [0,1],[1,2],[2,3],[3,4],
-        [0,5],[5,6],[6,7],[7,8],
-        [0,9],[9,10],[10,11],[11,12],
-        [0,13],[13,14],[14,15],[15,16],
-        [0,17],[17,18],[18,19],[19,20],
-        [5,9],[9,13],[13,17]
-      ];
-      monCtx.strokeStyle = 'rgba(212,168,64,0.5)';
-      monCtx.lineWidth = 1;
-      for (const [a, b] of connections) {
-        monCtx.beginPath();
-        monCtx.moveTo(hand[a].x * scaleX, hand[a].y * scaleY);
-        monCtx.lineTo(hand[b].x * scaleX, hand[b].y * scaleY);
-        monCtx.stroke();
-      }
-    }
-  }
-
-  // Draw pose skeleton (green)
-  if (results.poseLandmarks) {
-    const poseConnections = [
-      [11,12],[11,13],[13,15],[12,14],[14,16],
-      [11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28]
-    ];
-    for (const pose of results.poseLandmarks) {
-      monCtx.fillStyle = '#3a3';
-      for (const idx of POSE_JOINTS) {
-        if (pose[idx]) {
-          monCtx.beginPath();
-          monCtx.arc(pose[idx].x * scaleX, pose[idx].y * scaleY, 4, 0, Math.PI * 2);
-          monCtx.fill();
-        }
-      }
-      monCtx.strokeStyle = 'rgba(50,200,50,0.6)';
-      monCtx.lineWidth = 2;
-      for (const [a, b] of poseConnections) {
-        if (pose[a] && pose[b]) {
-          monCtx.beginPath();
-          monCtx.moveTo(pose[a].x * scaleX, pose[a].y * scaleY);
-          monCtx.lineTo(pose[b].x * scaleX, pose[b].y * scaleY);
-          monCtx.stroke();
-        }
-      }
-    }
-  }
-
-  // Status
-  const retrigMs = poseVel >= threshold ? Math.round(150 - (150 - 15) * speedNorm) : '-';
-  statusEl.textContent = `vel: ${poseVel.toFixed(4)} | retrig: ${retrigMs}ms | mode: ${mode}`;
-
-  // ── Draw Visual ──
+  // Resize canvas
   visCanvas.width = visCanvas.clientWidth;
   visCanvas.height = visCanvas.clientHeight;
+  const w = visCanvas.width;
+  const h = visCanvas.height;
 
-  // Fade trail
-  visCtx.fillStyle = 'rgba(10,10,10,0.15)';
-  visCtx.fillRect(0, 0, visCanvas.width, visCanvas.height);
+  // Collect all points for plexus
+  const allPoints = [];
+  const confidence = 0.85;
 
-  if (visualMode === 'flashes') {
-    // Draw and age flashes
-    for (let i = flashes.length - 1; i >= 0; i--) {
-      const f = flashes[i];
-      const age = now - f.birth;
-      f.alpha = Math.max(0, 1 - age / 200);
-      if (f.alpha <= 0) { flashes.splice(i, 1); continue; }
-      visCtx.beginPath();
-      visCtx.arc(f.x * visCanvas.width, f.y * visCanvas.height, f.r * f.alpha, 0, Math.PI * 2);
-      visCtx.fillStyle = `rgba(212,168,64,${f.alpha})`;
-      visCtx.fill();
-      // Glow
-      visCtx.beginPath();
-      visCtx.arc(f.x * visCanvas.width, f.y * visCanvas.height, f.r * 2 * f.alpha, 0, Math.PI * 2);
-      visCtx.fillStyle = `rgba(255,220,120,${f.alpha * 0.3})`;
-      visCtx.fill();
+  if (mode === 'hands') {
+    for (const hand of handLandmarks) {
+      for (const lm of hand) {
+        allPoints.push({ x: lm.x, y: lm.y, px: lm.x * w, py: lm.y * h });
+      }
     }
   } else {
-    // Waveform
+    for (const pose of poseLandmarks) {
+      for (const idx of POSE_JOINTS) {
+        if (pose[idx]) {
+          allPoints.push({ x: pose[idx].x, y: pose[idx].y, px: pose[idx].x * w, py: pose[idx].y * h });
+        }
+      }
+    }
+  }
+
+  // Compute velocity (avg of ALL landmarks)
+  const avgVel = computeAvgVelocity(allPoints);
+  const velocity = Math.min(avgVel * 15, 1);
+
+  // Compute spread (hands mode only)
+  let spread = 0;
+  let gesture = '-';
+  const now = performance.now();
+
+  if (mode === 'hands' && handLandmarks.length > 0) {
+    spread = computeSpread(handLandmarks);
+
+    // Trigger drums based on gesture (spread) and velocity
+    if (velocity > 0.05 && now - lastTriggerTime >= retriggerMs) {
+      lastTriggerTime = now;
+      const vol = velocity * volScale;
+
+      if (spread < 0.15) {
+        // FIST -> Kick
+        playKick(vol);
+        gesture = 'Fist>Kick';
+      } else if (spread > 0.4) {
+        // OPEN HAND -> HiHat
+        playHiHat(vol);
+        gesture = 'Open>HiHat';
+      } else {
+        // MID -> Snare
+        playSnare(vol);
+        gesture = 'Mid>Snare';
+      }
+    } else if (handLandmarks.length > 0) {
+      // Update gesture label even without trigger
+      if (spread < 0.15) gesture = 'Fist>Kick';
+      else if (spread > 0.4) gesture = 'Open>HiHat';
+      else gesture = 'Mid>Snare';
+    }
+  } else if (mode === 'body' && poseLandmarks.length > 0) {
+    // Body mode: velocity zones (like CEING afterlife scene 4)
+    if (velocity > 0.05 && now - lastTriggerTime >= retriggerMs) {
+      lastTriggerTime = now;
+      const vol = velocity * volScale;
+      playKick(vol * 0.6);
+      playSnare(vol);
+      if (velocity > 0.5) playHiHat(vol * 0.7);
+      gesture = velocity > 0.5 ? 'High>All' : 'Move>K+S';
+    } else if (poseLandmarks.length > 0) {
+      gesture = velocity > 0.5 ? 'High>All' : velocity > 0.05 ? 'Move>K+S' : 'Still';
+    }
+  }
+
+  // ── Update Dashboard ──
+  const hasTracking = allPoints.length > 0;
+  trackDot.classList.toggle('active', hasTracking);
+  if (mode === 'hands') {
+    dashHands.textContent = handLandmarks.length > 0 ? handLandmarks.length + ' hand' + (handLandmarks.length > 1 ? 's' : '') : '-';
+  } else {
+    dashHands.textContent = poseLandmarks.length > 0 ? poseLandmarks.length + ' pose' + (poseLandmarks.length > 1 ? 's' : '') : '-';
+  }
+  const velPct = Math.round(velocity * 100);
+  dashVel.textContent = velPct + '%';
+  velFill.style.width = velPct + '%';
+  dashSpread.textContent = mode === 'hands' && handLandmarks.length > 0 ? spread.toFixed(3) : '-';
+  dashGesture.textContent = gesture;
+
+  // ── Draw Visual ──
+  // Clear to solid black (no trail for plexus)
+  visCtx.fillStyle = '#0a0a0a';
+  visCtx.fillRect(0, 0, w, h);
+
+  if (visualMode === 'plexus') {
+    if (allPoints.length > 0) {
+      drawPlexus(visCtx, allPoints, w, h, confidence);
+    } else {
+      // No hands — show prompt
+      visCtx.font = '24px "Courier New", monospace';
+      visCtx.fillStyle = 'rgba(0, 229, 255, 0.5)';
+      visCtx.textAlign = 'center';
+      visCtx.textBaseline = 'middle';
+      visCtx.fillText('Show your hands', w / 2, h / 2);
+    }
+  } else {
+    // Waveform mode
     if (analyser) {
       const bufLen = analyser.frequencyBinCount;
       const dataArr = new Uint8Array(bufLen);
       analyser.getByteFrequencyData(dataArr);
-      const barW = visCanvas.width / bufLen;
+      const barW = w / bufLen;
       for (let i = 0; i < bufLen; i++) {
-        const barH = (dataArr[i] / 255) * visCanvas.height * 0.8;
-        visCtx.fillStyle = `rgba(212,168,64,${0.3 + (dataArr[i] / 255) * 0.7})`;
-        visCtx.fillRect(i * barW, visCanvas.height - barH, barW - 1, barH);
+        const barH = (dataArr[i] / 255) * h * 0.8;
+        const alpha = 0.3 + (dataArr[i] / 255) * 0.7;
+        visCtx.fillStyle = 'rgba(0, 229, 255, ' + alpha + ')';
+        visCtx.fillRect(i * barW, h - barH, barW - 1, barH);
       }
+    }
+    // Still show "no hands" if nothing tracked
+    if (allPoints.length === 0) {
+      visCtx.font = '24px "Courier New", monospace';
+      visCtx.fillStyle = 'rgba(0, 229, 255, 0.3)';
+      visCtx.textAlign = 'center';
+      visCtx.textBaseline = 'middle';
+      visCtx.fillText('Show your hands', w / 2, h / 2);
     }
   }
 }
@@ -540,13 +594,11 @@ function loop(timestamp) {
 startScreen.addEventListener('click', async () => {
   startScreen.style.display = 'none';
   ui.style.display = 'flex';
-  mainDiv.style.display = 'flex';
+  mainDiv.style.display = 'block';
 
   initAudio();
-  statusEl.textContent = 'Loading models...';
   await initCamera();
   await initMediaPipe();
-  statusEl.textContent = 'Ready';
   running = true;
   requestAnimationFrame(loop);
 });

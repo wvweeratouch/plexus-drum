@@ -11,7 +11,7 @@ canvas { display: block; width: 100vw; height: 100vh; }
 #clickOverlay {
   position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,0.9);
   display: flex; align-items: center; justify-content: center; cursor: pointer;
-  color: #d4a840; font-family: 'Courier New', monospace; font-size: 1.5rem;
+  color: #00e5ff; font-family: 'Courier New', monospace; font-size: 1.5rem;
 }
 </style>
 </head>
@@ -24,11 +24,11 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const bc = new BroadcastChannel('plexus-drum');
 
-let lastDataTime = 0;
-const flashes = [];
+const POSE_JOINTS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
 
-// Audio context + analyser for waveform (receives no audio — visual only from landmarks)
-let visualMode = 'flashes';
+let lastDataTime = 0;
+let latestPoints = [];
+let active = false;
 
 function resize() {
   canvas.width = window.innerWidth;
@@ -37,27 +37,19 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// Pose joints same as main
-const POSE_JOINTS = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
-
-let prevLandmarks = null;
-let poseVel = 0;
-const threshold = 0.05;
-let lastTriggerTime = 0;
-
-function extractPoints(data) {
+function extractPixelPoints(data, w, h) {
   const points = [];
   if (data.mode === 'hands' && data.handLandmarks) {
     for (const hand of data.handLandmarks) {
       for (const lm of hand) {
-        points.push({ x: lm.x, y: lm.y, z: lm.z || 0 });
+        points.push({ px: lm.x * w, py: lm.y * h });
       }
     }
   } else if (data.mode === 'body' && data.poseLandmarks) {
     for (const pose of data.poseLandmarks) {
       for (const idx of POSE_JOINTS) {
         if (pose[idx]) {
-          points.push({ x: pose[idx].x, y: pose[idx].y, z: pose[idx].z || 0 });
+          points.push({ px: pose[idx].x * w, py: pose[idx].y * h });
         }
       }
     }
@@ -65,82 +57,66 @@ function extractPoints(data) {
   return points;
 }
 
-function computeMaxVelocity(currentPoints) {
-  if (!prevLandmarks || prevLandmarks.length !== currentPoints.length) {
-    prevLandmarks = currentPoints;
-    return 0;
-  }
-  let maxV = 0;
-  for (let i = 0; i < currentPoints.length; i++) {
-    const dx = currentPoints[i].x - prevLandmarks[i].x;
-    const dy = currentPoints[i].y - prevLandmarks[i].y;
-    const dz = currentPoints[i].z - prevLandmarks[i].z;
-    const v = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (v > maxV) maxV = v;
-  }
-  prevLandmarks = currentPoints;
-  return maxV;
-}
-
 bc.onmessage = (e) => {
   lastDataTime = performance.now();
-  const data = e.data;
-  const points = extractPoints(data);
-  const rawVel = computeMaxVelocity(points);
-  poseVel = poseVel * 0.7 + rawVel * 0.3;
+  latestPoints = extractPixelPoints(e.data, canvas.width, canvas.height);
+};
 
-  const now = performance.now();
-  if (poseVel >= threshold && points.length > 0) {
-    const speedNorm = Math.min(Math.max((poseVel - threshold) / (0.3 - threshold), 0), 1);
-    const retriggerTime = 150 - (150 - 15) * speedNorm;
-    if (now - lastTriggerTime >= retriggerTime) {
-      lastTriggerTime = now;
-      const count = Math.min(points.length, 5);
-      for (let i = 0; i < count; i++) {
-        const idx = Math.floor(Math.random() * points.length);
-        flashes.push({
-          x: points[idx].x,
-          y: points[idx].y,
-          r: 6 + speedNorm * 30,
-          alpha: 1,
-          birth: now
-        });
+function drawPlexus(points, confidence) {
+  const maxDist = 400;
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const dx = points[i].px - points[j].px;
+      const dy = points[i].py - points[j].py;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < maxDist) {
+        const opacity = (1 - dist / maxDist) * 0.5 * confidence;
+        ctx.beginPath();
+        ctx.moveTo(points[i].px, points[i].py);
+        ctx.lineTo(points[j].px, points[j].py);
+        ctx.strokeStyle = 'rgba(0, 229, 255, ' + opacity + ')';
+        ctx.lineWidth = opacity > 0.25 ? 1.5 : 0.8;
+        ctx.stroke();
       }
     }
   }
-};
+  for (const p of points) {
+    ctx.beginPath();
+    ctx.arc(p.px, p.py, 7, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 229, 255, ' + (0.12 * confidence) + ')';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(p.px, p.py, 3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 229, 255, ' + confidence + ')';
+    ctx.fill();
+  }
+}
 
 function draw() {
   requestAnimationFrame(draw);
   const now = performance.now();
   const silence = now - lastDataTime > 2000;
 
-  // Fade — stronger fade toward black on silence
-  const fadeAlpha = silence ? 0.05 : 0.12;
-  ctx.fillStyle = `rgba(0,0,0,${fadeAlpha})`;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Solid black clear — fade to black on silence
+  if (silence) {
+    // Gradual fade
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  } else {
+    // Solid clear each frame (no trail for plexus)
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Draw flashes
-  for (let i = flashes.length - 1; i >= 0; i--) {
-    const f = flashes[i];
-    const age = now - f.birth;
-    f.alpha = Math.max(0, 1 - age / 250);
-    if (f.alpha <= 0) { flashes.splice(i, 1); continue; }
-    ctx.beginPath();
-    ctx.arc(f.x * canvas.width, f.y * canvas.height, f.r * f.alpha, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(212,168,64,${f.alpha})`;
-    ctx.fill();
-    // Glow
-    ctx.beginPath();
-    ctx.arc(f.x * canvas.width, f.y * canvas.height, f.r * 2.5 * f.alpha, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(255,220,120,${f.alpha * 0.25})`;
-    ctx.fill();
+    if (latestPoints.length > 0) {
+      drawPlexus(latestPoints, 0.85);
+    }
   }
 }
 
 overlay.addEventListener('click', () => {
   overlay.style.display = 'none';
   document.documentElement.requestFullscreen().catch(() => {});
+  active = true;
   requestAnimationFrame(draw);
 });
 </script>

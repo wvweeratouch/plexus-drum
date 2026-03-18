@@ -1,41 +1,79 @@
 # Plexus Drum
 
-Motion-to-drum interactive web app. Move your hands or body in front of a camera to trigger percussive sounds.
+Motion-to-drum interactive web app. Use hand gestures to select drums and movement velocity to control volume.
 
 **Live demo**: https://wvweeratouch.github.io/plexus-drum/
 **Mirror** (fullscreen visual): https://wvweeratouch.github.io/plexus-drum/mirror.html
 
 ## How It Works
 
-Uses MediaPipe HandLandmarker and PoseLandmarker to track joint positions from webcam video. Velocity of the fastest-moving joint drives drum synthesis via raw Web Audio API (no libraries).
+Uses MediaPipe HandLandmarker to track hand landmarks from webcam. A dense **cyan plexus wireframe** connects all detected landmarks — every pair of points within 400px draws a connecting line with distance-based opacity.
 
-### CEING Machinegun Trigger
+### Gesture → Drum Mapping (Hands Mode)
 
-The trigger system comes from the CEING experiment:
+Finger spread (average pairwise distance between all 5 fingertips) selects the drum:
 
-- Every frame: compute max velocity across all tracked joints
-- Smooth: `vel = vel * 0.7 + raw * 0.3`
-- Dead zone: skip if velocity < threshold (adjustable, default 0.05)
-- Map velocity to `speedNorm` (0-1), compute retrigger interval: `150 - 135 * speedNorm` (floor 15ms)
-- On every hit: **kick(v*0.6) + snare(v) always together**. HiHat(v*0.7) added when velocity > 0.03
-- Volume = `min(speedNorm * 1.2, 1) * volScale`
+| Spread | Gesture | Drum |
+|--------|---------|------|
+| < 0.15 | Fist | Kick |
+| 0.15 – 0.40 | Mid | Snare |
+| > 0.40 | Open hand | Hi-hat |
 
-This produces the "machinegun" effect -- faster movement = shorter retrigger = dense drum rolls.
+**Velocity** (average movement of ALL 21 landmarks from previous frame, normalized `× 15`, capped at 1) controls **volume**.
+
+### Body Mode
+
+Switches to PoseLandmarker tracking joints [0,11-16,23-28]. No gesture mapping — uses velocity zones instead:
+- Movement detected: Kick + Snare together
+- High velocity: adds Hi-hat
+
+### Echo Delay (always on by default)
+
+- Delay: 180ms
+- Feedback: 35%
+- Lowpass on feedback: 3kHz
+- Wet send: 30%
+
+### Retrigger
+
+Default: 50ms (adjustable 10–300ms via slider). Controls minimum time between drum hits.
+
+## Visual
+
+- **Plexus**: Dense cyan wireframe connecting all landmarks. Line opacity = `(1 - dist/400) × 0.5 × confidence`. Nodes at 3px with 7px glow halos. Color: `#00e5ff`.
+- **Waveform**: AnalyserNode frequency bars in cyan.
+- When no hands detected: "Show your hands" centered text.
 
 ## Controls
 
 | Control | What it does |
 |---------|-------------|
-| **Vol** | Master volume 0-100 (default 80) |
-| **Mode** | "Hands" = hand landmarks only, "Body" = pose skeleton (shoulders, elbows, wrists, hips, knees, ankles) |
-| **Echo** | Feedback delay: 120ms delay, 0.35 feedback, 0.3 wet mix |
-| **PoseT** | Velocity threshold 0.01-0.20 (lower = more sensitive) |
-| **Visual** | "Flashes" = hit dots at joint positions, "Waveform" = frequency bars from audio analyser |
-| **Persons** | 1-3 people tracked simultaneously |
+| **Vol** | Master volume 0–100 (default 80) |
+| **Mode** | "Hands" = hand landmarks + gesture mapping, "Body" = pose skeleton + velocity zones |
+| **Echo** | Feedback delay (ON by default): 180ms, 0.35 feedback, 3kHz lowpass, 0.3 wet |
+| **Retrig** | Retrigger interval 10–300ms (default 50ms) |
+| **Visual** | "Plexus" = cyan wireframe, "Waveform" = frequency bars |
+| **Persons** | 1–3 people tracked simultaneously |
+
+## Dashboard
+
+Right-side overlay showing:
+- Tracking status (green dot)
+- Number of hands/poses detected
+- Velocity percentage bar
+- Finger spread value
+- Current gesture → drum mapping
+
+## Layout
+
+- Main visual: full screen
+- Camera preview: small 160×90 overlay, bottom-left
+- Controls: top bar
+- Dashboard: right side overlay
 
 ## Mirror
 
-Open `mirror.html` in a second window/tab (same browser). It receives landmark data via `BroadcastChannel('plexus-drum')` and displays fullscreen hit flashes. Fades to black when no data arrives. Cursor hidden.
+Open `mirror.html` in a second window/tab (same browser). Receives landmark data via `BroadcastChannel('plexus-drum')` and renders the same cyan plexus wireframe. Fades to black after 2s of silence.
 
 ## Tech
 
