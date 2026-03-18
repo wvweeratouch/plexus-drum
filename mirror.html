@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plexus Drum — Mirror</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; cursor: none; }
+canvas { display: block; width: 100vw; height: 100vh; }
+#clickOverlay {
+  position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,0.9);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  color: #d4a840; font-family: 'Courier New', monospace; font-size: 1.5rem;
+}
+</style>
+</head>
+<body>
+<div id="clickOverlay">click for fullscreen mirror</div>
+<canvas id="c"></canvas>
+<script type="module">
+const overlay = document.getElementById('clickOverlay');
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const bc = new BroadcastChannel('plexus-drum');
+
+let lastDataTime = 0;
+const flashes = [];
+
+// Audio context + analyser for waveform (receives no audio — visual only from landmarks)
+let visualMode = 'flashes';
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Pose joints same as main
+const POSE_JOINTS = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+
+let prevLandmarks = null;
+let poseVel = 0;
+const threshold = 0.05;
+let lastTriggerTime = 0;
+
+function extractPoints(data) {
+  const points = [];
+  if (data.mode === 'hands' && data.handLandmarks) {
+    for (const hand of data.handLandmarks) {
+      for (const lm of hand) {
+        points.push({ x: lm.x, y: lm.y, z: lm.z || 0 });
+      }
+    }
+  } else if (data.mode === 'body' && data.poseLandmarks) {
+    for (const pose of data.poseLandmarks) {
+      for (const idx of POSE_JOINTS) {
+        if (pose[idx]) {
+          points.push({ x: pose[idx].x, y: pose[idx].y, z: pose[idx].z || 0 });
+        }
+      }
+    }
+  }
+  return points;
+}
+
+function computeMaxVelocity(currentPoints) {
+  if (!prevLandmarks || prevLandmarks.length !== currentPoints.length) {
+    prevLandmarks = currentPoints;
+    return 0;
+  }
+  let maxV = 0;
+  for (let i = 0; i < currentPoints.length; i++) {
+    const dx = currentPoints[i].x - prevLandmarks[i].x;
+    const dy = currentPoints[i].y - prevLandmarks[i].y;
+    const dz = currentPoints[i].z - prevLandmarks[i].z;
+    const v = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (v > maxV) maxV = v;
+  }
+  prevLandmarks = currentPoints;
+  return maxV;
+}
+
+bc.onmessage = (e) => {
+  lastDataTime = performance.now();
+  const data = e.data;
+  const points = extractPoints(data);
+  const rawVel = computeMaxVelocity(points);
+  poseVel = poseVel * 0.7 + rawVel * 0.3;
+
+  const now = performance.now();
+  if (poseVel >= threshold && points.length > 0) {
+    const speedNorm = Math.min(Math.max((poseVel - threshold) / (0.3 - threshold), 0), 1);
+    const retriggerTime = 150 - (150 - 15) * speedNorm;
+    if (now - lastTriggerTime >= retriggerTime) {
+      lastTriggerTime = now;
+      const count = Math.min(points.length, 5);
+      for (let i = 0; i < count; i++) {
+        const idx = Math.floor(Math.random() * points.length);
+        flashes.push({
+          x: points[idx].x,
+          y: points[idx].y,
+          r: 6 + speedNorm * 30,
+          alpha: 1,
+          birth: now
+        });
+      }
+    }
+  }
+};
+
+function draw() {
+  requestAnimationFrame(draw);
+  const now = performance.now();
+  const silence = now - lastDataTime > 2000;
+
+  // Fade — stronger fade toward black on silence
+  const fadeAlpha = silence ? 0.05 : 0.12;
+  ctx.fillStyle = `rgba(0,0,0,${fadeAlpha})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw flashes
+  for (let i = flashes.length - 1; i >= 0; i--) {
+    const f = flashes[i];
+    const age = now - f.birth;
+    f.alpha = Math.max(0, 1 - age / 250);
+    if (f.alpha <= 0) { flashes.splice(i, 1); continue; }
+    ctx.beginPath();
+    ctx.arc(f.x * canvas.width, f.y * canvas.height, f.r * f.alpha, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(212,168,64,${f.alpha})`;
+    ctx.fill();
+    // Glow
+    ctx.beginPath();
+    ctx.arc(f.x * canvas.width, f.y * canvas.height, f.r * 2.5 * f.alpha, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,220,120,${f.alpha * 0.25})`;
+    ctx.fill();
+  }
+}
+
+overlay.addEventListener('click', () => {
+  overlay.style.display = 'none';
+  document.documentElement.requestFullscreen().catch(() => {});
+  requestAnimationFrame(draw);
+});
+</script>
+</body>
+</html>
