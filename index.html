@@ -81,6 +81,8 @@ body { background: #0a0a0a; color: #e0e0e0; font-family: 'Courier New', monospac
     <option value="2">2</option>
     <option value="3">3</option>
   </select></label>
+  <div class="sep"></div>
+  <button id="btnBlackout">BLACKOUT</button>
 </div>
 
 <div id="main" style="display:none;">
@@ -602,6 +604,18 @@ startScreen.addEventListener('click', async () => {
   running = true;
   requestAnimationFrame(loop);
 });
+</script>
+
+<div id="blackoutOverlay" style="display:none;position:fixed;inset:0;background:#000;z-index:999999;cursor:pointer"></div>
+<script>
+(function(){
+  const o=document.getElementById('blackoutOverlay');
+  const t=()=>{o.style.display=o.style.display==='block'?'none':'block'};
+  o.addEventListener('click',t);
+  document.addEventListener('keydown',(e)=>{if(e.key==='b'||e.key==='B')t()});
+  const b=document.getElementById('btnBlackout');
+  if(b)b.addEventListener('click',t);
+})();
 </script>
 </body>
 </html>
